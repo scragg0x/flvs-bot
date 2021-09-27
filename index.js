@@ -28,14 +28,24 @@ const defaultPuppeteerOptions = {
 };
 
 const students = [
-  { name: 'Alexander Scragg', id: '4959341' },
-  { name: 'Julia Scragg', id: '4959339' },
+  {
+    name: 'Alexander Scragg',
+    id: '4959341',
+    flipbookUrl:
+      'https://learn.flvs.net/educator/common/ElementaryProgram/Flipbook/Flipbook_4.htm',
+  },
+  {
+    name: 'Julia Scragg',
+    id: '4959339',
+    flipbookUrl:
+      'https://learn.flvs.net/educator/common/ElementaryProgram/Flipbook/Flipbook_2.htm',
+  },
 ];
 
 let page;
 
 const getText = async (sel) => {
-  await page.waitForSelector(sel);
+  await page.waitForSelector(sel, { timeout: 10000 });
   const element = await page.$(sel);
   return await page.evaluate((el) => el.textContent, element);
 };
@@ -157,6 +167,15 @@ const gotoGradebook = async () => {
   }
 };
 
+const gotoFlipbookCourseUrls = async (flipbookUrl) => {
+  await page.goto(flipbookUrl, { waitUntil: 'networkidle0' });
+  const slideUrls = await page.$$eval('iframe', (el) =>
+    el.map((x) => x.getAttribute('src'))
+  );
+
+  console.log(slideUrls);
+};
+
 const main = async () => {
   const output = [];
   const browser = await puppeteer.launch(defaultPuppeteerOptions);
@@ -169,26 +188,42 @@ const main = async () => {
     await selectFirstCourse();
     const courses = await getCoursesFromDropdown();
     for (const course of courses) {
-      await page.goto(course.url, { waitUntil: 'networkidle0' });
-      await gotoGradebook();
-      const lastSubmitted = (await getText('.last-submitted-date')).trim();
-
-      const momentObj = moment(new Date(lastSubmitted));
-
-      output.push({
+      let obj = {
         name: student.name,
         course: course.name,
-        lastSubmitted,
-        fromNow: momentObj.fromNow(),
-        ts: momentObj.unix(),
-      });
+      };
+      await page.goto(course.url, { waitUntil: 'networkidle0' });
+      await gotoGradebook();
+
+      try {
+        obj.lastAssignment = await getText('#topsum .points-right-column a');
+      } catch (err) {
+        console.error(err);
+      }
+
+      try {
+        const lastSubmitted = (await getText('.last-submitted-date')).trim();
+
+        const momentObj = moment(new Date(lastSubmitted));
+
+        obj = {
+          ...obj,
+          lastSubmitted,
+          fromNow: momentObj.fromNow(),
+          ts: momentObj.unix(),
+        };
+      } catch (err) {
+        console.error(err);
+      }
+
+      output.push(obj);
 
       // console.log(output);
     }
     await gotoDashboard();
   }
 
-  output.sort((a,b) => (a.ts > b.ts) ? 1 : ((b.ts > a.ts) ? -1 : 0))
+  output.sort((a, b) => (a.ts > b.ts ? 1 : b.ts > a.ts ? -1 : 0));
 
   console.log(JSON.stringify(output, null, 2));
   await page.waitForTimeout(60000);
